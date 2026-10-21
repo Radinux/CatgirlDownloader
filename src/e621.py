@@ -7,6 +7,8 @@ from .types import NSFWOption
 from .danbooru import DanbooruDownloaderAPI, _REQUEST_HEADERS, _BATCH_SIZE, _displayable_extensions
 
 _MAX_TAGS = 6
+# Only popular posts: e621's score is upvotes minus downvotes.
+_MIN_SCORE = 50
 # Same idea as Danbooru's censored tags, plus e621's own tags for minors.
 _FORBIDDEN_TAGS = tuple(
     base64.b64decode(tag.encode('utf-8')).decode('utf-8')
@@ -23,7 +25,8 @@ class E621DownloaderAPI(DanbooruDownloaderAPI):
     _site_name = "e621"
     _tags_preference = "e621_tags"
     _max_tags = _MAX_TAGS
-    _tag_limit_hint = f"You can use at most {_MAX_TAGS} tags."
+    _tag_limit_hint = (f"You can use at most {_MAX_TAGS} tags. Only posts with "
+                       f"a score of at least {_MIN_SCORE} are shown.")
     _forbidden_tags = _FORBIDDEN_TAGS
     _forbidden_tags_message = "Some tags are not allowed in CatgirlDownloader and have been automatically removed from your settings."
     _safe_rating = "rating:s"
@@ -45,7 +48,7 @@ class E621DownloaderAPI(DanbooruDownloaderAPI):
         tags = self._build_tags_query(nsfw_mode)
         params = {
             "limit": _BATCH_SIZE,
-            "tags": f"{tags} order:random".strip(),
+            "tags": f"{tags} score:>={_MIN_SCORE} order:random".strip(),
         }
         displayable = _displayable_extensions()
 

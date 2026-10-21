@@ -9,6 +9,7 @@ install_data(
 install_data(
   join_paths(scalable_dir, ('moe.nyarchlinux.waifudownloader.svg')),
   join_paths(scalable_dir, ('danbooru.svg')),
+  join_paths(scalable_dir, ('e621.svg')),
   install_dir: join_paths(get_option('datadir'), 'icons', scalable_dir)
 )
 

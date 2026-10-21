@@ -110,9 +110,9 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
         },
         "e621": {
             "name": "e621",
-            "description": "Generate images from e621.net with custom tags (up to 6).",
+            "description": "Generate images from e621.net with custom tags (up to 6, score 50+).",
             "class": E621DownloaderAPI,
-            "icon": "image-x-generic"
+            "icon": "e621"
         }
     }
 
