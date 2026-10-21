@@ -3,6 +3,7 @@ import json
 import time
 import base64
 import functools
+import random
 import threading
 from typing import Optional, Any
 
@@ -212,6 +213,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         self._settings = settings
         self._load_tags()
         self._settings_window = None
+        self._max_post_id = None
 
     def _load_tags(self) -> None:
         if self._settings:
@@ -256,6 +258,40 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
             pass
         return f"Danbooru answered with HTTP {r.status_code}"
 
+    def _request_posts(self, params: dict) -> Optional[list]:
+        """Posts matching params, or None (with last_error set) on failure."""
+        try:
+            r = requests.get(
+                f"{self.endpoint}/posts.json",
+                params=params,
+                headers=_REQUEST_HEADERS,
+                timeout=10,
+            )
+        except Exception as e:
+            print(e)
+            self.last_error = "Could not reach Danbooru"
+            return None
+        if r.status_code != 200:
+            self.last_error = self._error_from_response(r)
+            print(self.last_error)
+            return None
+        try:
+            data = r.json()
+        except ValueError:
+            self.last_error = "Danbooru sent an invalid response"
+            return None
+        return data if isinstance(data, list) else []
+
+    def _latest_post_id(self) -> Optional[int]:
+        """Id of the newest post, fetched once per session."""
+        if self._max_post_id is None:
+            posts = self._request_posts({"limit": 1})
+            if posts:
+                self._max_post_id = posts[0].get("id")
+            elif posts is not None:
+                self.last_error = "Danbooru sent an invalid response"
+        return self._max_post_id
+
     def get_random_post(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW, max_retries: int = 3,
                         media_type: MediaType = MediaType.ALL) -> Optional[dict]:
         self.last_error = None
@@ -264,42 +300,36 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         # filetype: doesn't count toward the anonymous tag limit.
         if media_type != MediaType.ALL:
             tags = f"{tags} filetype:{','.join(sorted(displayable & _SITE_FILE_TYPES))}".strip()
-        # Ask for a batch of random posts and keep the first usable one:
-        # many posts are ugoira/mp4 or formats we can't play, or have
-        # no file_url for anonymous users, and a single random post would
-        # then leave the window unchanged.
-        params = {
-            "limit": _BATCH_SIZE,
-            "random": "true"
-        }
+        # Ask for a batch of posts and keep a usable one: many posts are
+        # ugoira/mp4 or formats we can't play, or have no file_url for
+        # anonymous users, and a single post would then leave the window
+        # unchanged.
+        params = {"limit": _BATCH_SIZE}
         if tags:
             params["tags"] = tags
 
+        max_id = self._latest_post_id()
+        if not max_id:
+            return None
+
         for attempt in range(max_retries):
-            try:
-                r = requests.get(
-                    f"{self.endpoint}/posts.json",
-                    params=params,
-                    headers=_REQUEST_HEADERS,
-                    timeout=10,
-                )
-            except Exception as e:
-                print(e)
-                self.last_error = "Could not reach Danbooru"
-                return None
-            if r.status_code != 200:
-                self.last_error = self._error_from_response(r)
-                print(self.last_error)
-                return None
-            try:
-                data = r.json()
-            except ValueError:
-                self.last_error = "Danbooru sent an invalid response"
-                return None
-            if not isinstance(data, list) or not data:
+            # random=true counts as a tag for anonymous users (it becomes
+            # order:random), leaving room for a single tag. Pick a random
+            # spot in the id range instead and read the posts just below
+            # it, or just above when there are none below.
+            pivot = random.randint(1, max_id)
+            data = []
+            for page in (f"b{pivot}", f"a{pivot}"):
+                data = self._request_posts({**params, "page": page})
+                if data is None:
+                    return None
+                if data:
+                    break
+            if not data:
                 self.last_error = "No Danbooru posts match these tags"
                 return None
 
+            random.shuffle(data)
             for post in data:
                 post_tags = post.get('tag_string', '').split()
                 if _FORBIDDEN_TAG_1 in post_tags or _FORBIDDEN_TAG_2 in post_tags:
