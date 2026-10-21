@@ -34,16 +34,17 @@ def _displayable_extensions() -> set[str]:
         return set(_FALLBACK_EXTENSIONS)
 
 
-def _is_forbidden_tag(name: str) -> bool:
+def _is_forbidden_tag(name: str, forbidden=(_FORBIDDEN_TAG_1, _FORBIDDEN_TAG_2)) -> bool:
     words = name.lower().split("_")
-    return _FORBIDDEN_TAG_1 in words or _FORBIDDEN_TAG_2 in words
+    return any(tag in words for tag in forbidden)
 
 
-def _fetch_tag_suggestions(word: str) -> list[tuple[str, int]]:
-    """Most used Danbooru tags starting with 'word', as (name, post count)."""
+def _fetch_tag_suggestions(word: str, endpoint: str = "https://danbooru.donmai.us",
+                           forbidden=(_FORBIDDEN_TAG_1, _FORBIDDEN_TAG_2)) -> list[tuple[str, int]]:
+    """Most used tags starting with 'word', as (name, post count)."""
     try:
         r = requests.get(
-            "https://danbooru.donmai.us/tags.json",
+            f"{endpoint}/tags.json",
             params={
                 "search[name_matches]": f"{word}*",
                 "search[order]": "count",
@@ -62,16 +63,18 @@ def _fetch_tag_suggestions(word: str) -> list[tuple[str, int]]:
     return [(tag["name"], tag.get("post_count", 0))
             for tag in data
             if isinstance(tag, dict) and tag.get("name")
-            and not _is_forbidden_tag(tag["name"])]
+            and not _is_forbidden_tag(tag["name"], forbidden)]
 
 
 class _TagAutocomplete:
-    """Suggests existing Danbooru tags for the word under the cursor of an entry."""
+    """Suggests existing tags of a Danbooru-like site for the word under the cursor of an entry."""
 
-    def __init__(self, entry: Any, listbox: Any, revealer: Any) -> None:
+    def __init__(self, entry: Any, listbox: Any, revealer: Any, endpoint: str, forbidden) -> None:
         self._entry = entry
         self._listbox = listbox
         self._revealer = revealer
+        self._endpoint = endpoint
+        self._forbidden = forbidden
         self._timeout_id = 0
         self._generation = 0
         self._suppress = False
@@ -96,14 +99,14 @@ class _TagAutocomplete:
         if self._suppress:
             self._hide()
             return
-        # Wait until the user stops typing before querying Danbooru.
+        # Wait until the user stops typing before querying the site.
         self._timeout_id = GLib.timeout_add(_SUGGESTION_DELAY_MS, self._on_timeout)
 
     def _on_timeout(self) -> bool:
         self._timeout_id = 0
         start, end = self._current_word()
         word = self._entry.get_text()[start:end].lower().lstrip("-")
-        if not word or _is_forbidden_tag(word):
+        if not word or _is_forbidden_tag(word, self._forbidden):
             self._hide()
             return False
         generation = self._generation
@@ -113,7 +116,7 @@ class _TagAutocomplete:
     def _fetch_thread(self, word: str, generation: int) -> None:
         from gi.repository import GLib
 
-        suggestions = _fetch_tag_suggestions(word)
+        suggestions = _fetch_tag_suggestions(word, self._endpoint, self._forbidden)
         GLib.idle_add(self._show, suggestions, generation)
 
     def _show(self, suggestions: list[tuple[str, int]], generation: int) -> bool:
@@ -161,6 +164,16 @@ class _TagAutocomplete:
 
 
 class DanbooruDownloaderAPI(BaseDownloaderAPI):
+    # Overridden by sources sharing this tag search and settings window (see e621.py).
+    _site_name = "Danbooru"
+    _tags_preference = "danbooru_tags"
+    _max_tags = _MAX_ANONYMOUS_TAGS
+    _tag_limit_hint = f"Without a Danbooru account you can use at most {_MAX_ANONYMOUS_TAGS} tags."
+    _forbidden_tags = (_FORBIDDEN_TAG_1, _FORBIDDEN_TAG_2)
+    _forbidden_tags_message = 'Due to a limitation of Danbooru, certain tags have been automatically removed from your settings. For more information, please visit <a href="https://danbooru.donmai.us/wiki_pages/help:censored_tags">Danbooru\'s "censored tags" help page</a>.'
+    _safe_rating = "rating:general"
+    _explicit_rating = "rating:explicit"
+
     def __init__(self, settings=None) -> None:
         super().__init__()
         self.endpoint = "https://danbooru.donmai.us"
@@ -170,7 +183,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
 
     def _load_tags(self) -> None:
         if self._settings:
-            self.tags = self._settings.get_preference("danbooru_tags") or ""
+            self.tags = self._settings.get_preference(self._tags_preference) or ""
         else:
             self.tags = ""
 
@@ -187,9 +200,9 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         tags = self.tags.strip() if self.tags else ""
 
         if nsfw_mode == NSFWOption.BLOCK_NSFW or nsfw_mode == NSFWOption.BLOCK_NSFW.value:
-            rating_tag = "rating:general"
+            rating_tag = self._safe_rating
         elif nsfw_mode == NSFWOption.ONLY_NSFW or nsfw_mode == NSFWOption.ONLY_NSFW.value:
-            rating_tag = "rating:explicit"
+            rating_tag = self._explicit_rating
         else:
             rating_tag = None
 
@@ -315,7 +328,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         from gi.repository import Gtk, Adw
 
         window = Adw.PreferencesWindow()
-        window.set_title("Danbooru Settings")
+        window.set_title(f"{self._site_name} Settings")
         window.set_modal(True)
 
         if isinstance(parent, Gtk.Window):
@@ -346,8 +359,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         desc_label = Gtk.Label(
             label="Separate tags with spaces and write multi-word tags with "
                   "underscores (cat_ears, not \"cat ears\"). Put a minus "
-                  "before a tag to exclude it (-cat_ears). Without a Danbooru "
-                  f"account you can use at most {_MAX_ANONYMOUS_TAGS} tags."
+                  f"before a tag to exclude it (-cat_ears). {self._tag_limit_hint}"
         )
         desc_label.add_css_class("caption")
         desc_label.set_halign(Gtk.Align.START)
@@ -375,7 +387,8 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         revealer = Gtk.Revealer()
         revealer.set_child(suggestions)
         vbox.append(revealer)
-        window._tag_autocomplete = _TagAutocomplete(entry, suggestions, revealer)
+        window._tag_autocomplete = _TagAutocomplete(entry, suggestions, revealer,
+                                                    self.endpoint, self._forbidden_tags)
 
         row = Adw.PreferencesRow()
         row.set_child(vbox)
@@ -388,18 +401,15 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
 
     def _on_tags_changed(self, entry: Any, window: Any) -> None:
         tagcheck = entry.get_text().lower().split()
-        while _FORBIDDEN_TAG_1 in tagcheck:
-            tagcheck.remove(_FORBIDDEN_TAG_1)
-        while _FORBIDDEN_TAG_2 in tagcheck:
-            tagcheck.remove(_FORBIDDEN_TAG_2)
+        tagcheck = [tag for tag in tagcheck if tag not in self._forbidden_tags]
         self.tags = ' '.join(tagcheck)
         if self._settings:
-            self._settings.set_preference("danbooru_tags", self.tags)
+            self._settings.set_preference(self._tags_preference, self.tags)
 
     def _update_tag_count(self, entry: Any, label: Any) -> None:
         count = len(entry.get_text().split())
-        label.set_label(f"{count}/{_MAX_ANONYMOUS_TAGS} tags")
-        if count > _MAX_ANONYMOUS_TAGS:
+        label.set_label(f"{count}/{self._max_tags} tags")
+        if count > self._max_tags:
             label.add_css_class("warning")
             entry.add_css_class("warning")
         else:
@@ -408,7 +418,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
 
     def _on_prefs_close(self, text: Any, parent: Any) -> None:
         tagcheck = text.get_text().lower().split()
-        if _FORBIDDEN_TAG_1 in tagcheck or _FORBIDDEN_TAG_2 in tagcheck:
+        if any(tag in tagcheck for tag in self._forbidden_tags):
             self.open_forbid_tag_notif(parent)
 
     def open_forbid_tag_notif(self, parent: Any) -> None:
@@ -416,10 +426,10 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
 
         dialog = Adw.MessageDialog(
             modal = True,
-            heading = "Danbooru Settings",
+            heading = f"{self._site_name} Settings",
         )
         dialog.set_body_use_markup(True)
-        dialog.set_body('Due to a limitation of Danbooru, certain tags have been automatically removed from your settings. For more information, please visit <a href="https://danbooru.donmai.us/wiki_pages/help:censored_tags">Danbooru\'s "censored tags" help page</a>.')
+        dialog.set_body(self._forbidden_tags_message)
 
         if isinstance(parent, Gtk.Window):
             dialog.set_transient_for(parent)

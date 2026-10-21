@@ -24,6 +24,7 @@ from gi.repository import Gtk, Adw, GdkPixbuf, GLib, Gio, GObject
 from .catgirl import CatgirlDownloaderAPI
 from .waifu import WaifuDownloaderAPI
 from .danbooru import DanbooruDownloaderAPI
+from .e621 import E621DownloaderAPI
 from .preferences import UserPreferences
 from .types import NSFWOption
 
@@ -106,6 +107,12 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
             "description": "Generate images from danbooru.donmai.us with custom tags.",
             "class": DanbooruDownloaderAPI,
             "icon": "danbooru"
+        },
+        "e621": {
+            "name": "e621",
+            "description": "Generate images from e621.net with custom tags (up to 6).",
+            "class": E621DownloaderAPI,
+            "icon": "image-x-generic"
         }
     }
 

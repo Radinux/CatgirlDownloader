@@ -31,6 +31,7 @@ catgirldownloader_sources = [
   'window.py',
   'catgirl.py',
   'danbooru.py',
+  'e621.py',
   'preferences.py',
   'preferenceswindow.py',
   'waifu.py',
