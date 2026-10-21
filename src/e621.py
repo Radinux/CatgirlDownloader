@@ -4,7 +4,7 @@ import time
 from typing import Optional
 
 from .types import NSFWOption
-from .danbooru import DanbooruDownloaderAPI, _REQUEST_HEADERS, _BATCH_SIZE, _displayable_extensions
+from .danbooru import DanbooruDownloaderAPI, _REQUEST_HEADERS, _BATCH_SIZE, _displayable_extensions, _video_extensions
 
 _MAX_TAGS = 6
 # Only popular posts: e621's score is upvotes minus downvotes.
@@ -50,7 +50,7 @@ class E621DownloaderAPI(DanbooruDownloaderAPI):
             "limit": _BATCH_SIZE,
             "tags": f"{tags} score:>={_MIN_SCORE} order:random".strip(),
         }
-        displayable = _displayable_extensions()
+        displayable = _displayable_extensions() | _video_extensions()
 
         for attempt in range(max_retries):
             try:

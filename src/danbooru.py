@@ -2,6 +2,7 @@ import requests
 import json
 import time
 import base64
+import functools
 import threading
 from typing import Optional, Any
 
@@ -163,6 +164,22 @@ class _TagAutocomplete:
         self._hide()
 
 
+@functools.lru_cache(maxsize=1)
+def _video_extensions() -> set[str]:
+    """{"webm"} when GStreamer can demux and decode WebM for GtkVideo."""
+    try:
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        Gst.init(None)
+        find = Gst.ElementFactory.find
+        if find("matroskademux") and any(find(name) for name in ("vp9dec", "avdec_vp9", "vp8dec", "avdec_vp8")):
+            return {"webm"}
+    except Exception as e:
+        print(f"WebM playback unavailable: {e}")
+    return set()
+
+
 class DanbooruDownloaderAPI(BaseDownloaderAPI):
     # Overridden by sources sharing this tag search and settings window (see e621.py).
     _site_name = "Danbooru"
@@ -228,7 +245,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         self.last_error = None
         tags = self._build_tags_query(nsfw_mode)
         # Ask for a batch of random posts and keep the first usable one:
-        # many posts are videos/ugoira (not loadable by GdkPixbuf) or have
+        # many posts are ugoira/mp4 or formats we can't play, or have
         # no file_url for anonymous users, and a single random post would
         # then leave the window unchanged.
         params = {
@@ -237,7 +254,7 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         }
         if tags:
             params["tags"] = tags
-        displayable = _displayable_extensions()
+        displayable = _displayable_extensions() | _video_extensions()
 
         for attempt in range(max_retries):
             try:

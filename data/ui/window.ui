@@ -65,6 +65,13 @@
                 <property name="content-fit">contain</property>
               </object>
             </child>
+            <child>
+              <object class="GtkVideo" id="video">
+                <property name="visible">false</property>
+                <property name="autoplay">true</property>
+                <property name="loop">true</property>
+              </object>
+            </child>
           </object>
         </child>
       </object>

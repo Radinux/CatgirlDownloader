@@ -28,6 +28,9 @@ from .e621 import E621DownloaderAPI
 from .preferences import UserPreferences
 from .types import NSFWOption
 
+# WebM files are Matroska (EBML) containers.
+_WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
+
 
 def load_image_with_callback(url, callback, error_callback=None, headers=None):
     """
@@ -36,12 +39,14 @@ def load_image_with_callback(url, callback, error_callback=None, headers=None):
     Args:
         url (str): The URL of the image to load
         callback (callable): Function to call when image is loaded successfully.
-                           Should accept (pixbuf_loader, content_bytes) as argument
+                           Should accept (pixbuf_loader, content_bytes) as argument;
+                           pixbuf_loader is None for WebM videos
         error_callback (callable, optional): Function to call on error.
                                            Should accept (exception) as argument
     """ 
     def _load_image():
-        pixbuf_loader = GdkPixbuf.PixbufLoader()
+        pixbuf_loader = None
+        is_video = None
         data = bytearray()
         try:
             response = requests.get(url, headers=headers, stream=True, timeout=30)
@@ -49,8 +54,23 @@ def load_image_with_callback(url, callback, error_callback=None, headers=None):
             
             for chunk in response.iter_content(chunk_size=1024):
                 data.extend(chunk)
-                pixbuf_loader.write(chunk)
+                if is_video is None:
+                    if len(data) < len(_WEBM_MAGIC):
+                        continue
+                    # GdkPixbuf can't decode videos: keep them for GtkVideo.
+                    is_video = data.startswith(_WEBM_MAGIC)
+                    if not is_video:
+                        pixbuf_loader = GdkPixbuf.PixbufLoader()
+                        chunk = bytes(data)
+                if not is_video:
+                    pixbuf_loader.write(chunk)
             
+            if is_video:
+                GLib.idle_add(callback, None, bytes(data))
+                return
+            if pixbuf_loader is None:
+                pixbuf_loader = GdkPixbuf.PixbufLoader()
+                pixbuf_loader.write(bytes(data))
             pixbuf_loader.close()
             
             # Schedule callback on main thread
@@ -84,6 +104,7 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
     refresh_button = Gtk.Template.Child("refresh_button")
     spinner = Gtk.Template.Child("spinner")
     image = Gtk.Template.Child("image")
+    video = Gtk.Template.Child("video")
     save_button = Gtk.Template.Child("savebutton")
     auto_reload_switch = Gtk.Template.Child("auto_reload_switch")
     source_selector = Gtk.Template.Child("source_selector")
@@ -169,6 +190,7 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
 
         self._is_loading = False
         self._reload_pending = False
+        self._animation_timeout_id = None
         self._auto_reload_timeout_id = None
         self._auto_reload_interval = self._get_auto_reload_interval()
 
@@ -407,29 +429,68 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
             if self._reload_pending:
                 # The user switched source meanwhile: don't show a stale image.
                 return
-            pixbuf = loader.get_pixbuf()
-            if pixbuf is None:
-                raise ValueError("unsupported image format")
-            self.image.set_pixbuf(pixbuf)
+            if loader is None:
+                self._show_video(content)
+            else:
+                pixbuf = loader.get_pixbuf()
+                if pixbuf is None:
+                    raise ValueError("unsupported image format")
+                self._show_picture(pixbuf, loader.get_animation())
 
             # Only remember the image once it is actually displayed, so
             # Save and About Art always match what is on screen.
             self.info = info
             self.imagecontent = content
             self.loaded_source_id = source_id
-            self.image_extension = None
-            image_format = loader.get_format()
+            self.image_extension = "webm" if loader is None else None
+            image_format = loader.get_format() if loader is not None else None
             if image_format:
                 extensions = image_format.get_extensions()
                 if extensions:
                     self.image_extension = extensions[0]
 
-            self.image.set_visible(True)
         except Exception as e:
             print(f"Error displaying image: {e}")
             self._show_error(f"Couldn't display this image ({e})")
         finally:
             self._finish_loading()
+
+    def _show_picture(self, pixbuf, animation=None):
+        """Show a still image, or play it when it is animated (GIF, WebP)."""
+        self._stop_media()
+        self.image.set_pixbuf(pixbuf)
+        self.image.set_visible(True)
+        if animation is not None and not animation.is_static_image():
+            self._play_animation(animation.get_iter(None))
+
+    def _play_animation(self, frames):
+        delay = frames.get_delay_time()
+        if delay < 0:
+            # Last frame of an animation that doesn't loop.
+            return
+
+        def next_frame():
+            frames.advance(None)
+            self.image.set_pixbuf(frames.get_pixbuf())
+            self._play_animation(frames)
+            return False
+
+        self._animation_timeout_id = GLib.timeout_add(max(delay, 20), next_frame)
+
+    def _show_video(self, content):
+        """Play a WebM video in a loop, straight from the downloaded bytes."""
+        self._stop_media()
+        stream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes.new(content))
+        self.video.set_media_stream(Gtk.MediaFile.new_for_input_stream(stream))
+        self.image.set_visible(False)
+        self.video.set_visible(True)
+
+    def _stop_media(self):
+        if self._animation_timeout_id is not None:
+            GLib.source_remove(self._animation_timeout_id)
+            self._animation_timeout_id = None
+        self.video.set_media_stream(None)
+        self.video.set_visible(False)
 
     def _on_image_error(self, error, source_id=None):
         print(f"Image loading error: {error}")
