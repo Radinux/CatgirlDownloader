@@ -6,6 +6,7 @@ class UserPreferences:
     def __init__(self):
         self._defaults = {
             "nsfw_mode": "Block NSFW",
+            "media_type": "Photos and animations",
             "auto_reload_enabled": False,
             "auto_reload_interval": 5,
             "danbooru_tags": "",

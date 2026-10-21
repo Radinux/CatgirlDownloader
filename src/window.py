@@ -26,7 +26,7 @@ from .waifu import WaifuDownloaderAPI
 from .danbooru import DanbooruDownloaderAPI
 from .e621 import E621DownloaderAPI
 from .preferences import UserPreferences
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 
 # WebM files are Matroska (EBML) containers.
 _WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
@@ -305,6 +305,12 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
         except ValueError:
             return NSFWOption.BLOCK_NSFW
 
+    def _get_media_type(self) -> MediaType:
+        try:
+            return MediaType(self.settings.get_preference("media_type"))
+        except ValueError:
+            return MediaType.ALL
+
     def get_loaded_api(self):
         """API object of the source the displayed image came from."""
         return self.downloaders.get(self.loaded_source_id)
@@ -407,7 +413,7 @@ class CatgirldownloaderWindow(Adw.ApplicationWindow):
                 source_id = next(iter(self.downloaders))
             ct = self.downloaders[source_id]
 
-            url = ct.get_image_url(self._get_nsfw_mode())
+            url = ct.get_image_url(self._get_nsfw_mode(), self._get_media_type())
             info = getattr(ct, "info", None)
 
             if url:

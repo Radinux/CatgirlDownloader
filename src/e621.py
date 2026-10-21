@@ -3,8 +3,8 @@ import requests
 import time
 from typing import Optional
 
-from .types import NSFWOption
-from .danbooru import DanbooruDownloaderAPI, _REQUEST_HEADERS, _BATCH_SIZE, _displayable_extensions, _video_extensions
+from .types import NSFWOption, MediaType
+from .danbooru import DanbooruDownloaderAPI, _REQUEST_HEADERS, _BATCH_SIZE, _SITE_FILE_TYPES, _allowed_extensions
 
 _MAX_TAGS = 6
 # Only popular posts: e621's score is upvotes minus downvotes.
@@ -40,17 +40,23 @@ class E621DownloaderAPI(DanbooruDownloaderAPI):
     def _post_tags(post: dict) -> list[str]:
         return [tag for group in (post.get("tags") or {}).values() for tag in group]
 
-    def get_random_post(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW, max_retries: int = 3) -> Optional[dict]:
+    def get_random_post(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW, max_retries: int = 3,
+                        media_type: MediaType = MediaType.ALL) -> Optional[dict]:
         self.last_error = None
         if len(self.tags.split()) > _MAX_TAGS:
             self.last_error = f"e621: use at most {_MAX_TAGS} tags"
             return None
         tags = self._build_tags_query(nsfw_mode)
+        displayable = _allowed_extensions(media_type)
+        if media_type != MediaType.ALL:
+            # "~" ORs the file types together.
+            types = sorted(displayable & _SITE_FILE_TYPES)
+            prefix = "~" if len(types) > 1 else ""
+            tags = " ".join([tags] + [f"{prefix}type:{t}" for t in types]).strip()
         params = {
             "limit": _BATCH_SIZE,
             "tags": f"{tags} score:>={_MIN_SCORE} order:random".strip(),
         }
-        displayable = _displayable_extensions() | _video_extensions()
 
         for attempt in range(max_retries):
             try:
@@ -90,11 +96,13 @@ class E621DownloaderAPI(DanbooruDownloaderAPI):
             print(f'Attempt {attempt + 1}: no displayable post in batch, retrying...')
 
         print(f'Could not find suitable post after {max_retries} attempts')
-        self.last_error = "No displayable e621 image found for these tags"
+        kind = "animated" if media_type == MediaType.ANIMATED else "displayable"
+        self.last_error = f"No {kind} e621 image found for these tags"
         return None
 
-    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW) -> Optional[str]:
-        post = self.get_random_post(nsfw_mode)
+    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW,
+                      media_type: MediaType = MediaType.ALL) -> Optional[str]:
+        post = self.get_random_post(nsfw_mode, media_type=media_type)
         if post:
             return post["file"]["url"]
         return None

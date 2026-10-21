@@ -1,12 +1,13 @@
 from gi.repository import Gtk, Adw
 from .preferences import UserPreferences
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 
 @Gtk.Template(resource_path='/moe/nyarchlinux/catgirldownloader/../data/ui/preferences.ui')
 class PreferencesWindow(Adw.PreferencesWindow):
     __gtype_name__ = 'PreferencesWindow'
 
     nsfw_dropdown = Gtk.Template.Child("nsfw_dropdown")
+    media_type_dropdown = Gtk.Template.Child("media_type_dropdown")
     auto_reload_seconds = Gtk.Template.Child("auto_reload_seconds")
 
     def __init__(self, window, **kwargs):
@@ -29,6 +30,15 @@ class PreferencesWindow(Adw.PreferencesWindow):
 
         self.nsfw_dropdown.connect("notify::selected", self.on_nsfw_change)
 
+        self._media_types = [option.value for option in MediaType]
+        self.media_type_dropdown.set_model(Gtk.StringList.new(self._media_types))
+        try:
+            index = self._media_types.index(self.settings.get_preference("media_type"))
+        except ValueError:
+            index = 0
+        self.media_type_dropdown.set_selected(index)
+        self.media_type_dropdown.connect("notify::selected", self.on_media_type_change)
+
         seconds = self.settings.get_preference("auto_reload_interval")
         try:
             seconds = int(seconds) if seconds is not None else 30
@@ -45,6 +55,11 @@ class PreferencesWindow(Adw.PreferencesWindow):
             return
         value = self._nsfw_options[index]
         self.settings.set_preference("nsfw_mode", value)
+
+    def on_media_type_change(self, dropdown, _):
+        index = dropdown.get_selected()
+        if 0 <= index < len(self._media_types):
+            self.settings.set_preference("media_type", self._media_types[index])
 
     def on_auto_reload_seconds_change(self, spin):
         seconds = int(spin.get_value())

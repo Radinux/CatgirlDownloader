@@ -6,7 +6,7 @@ import functools
 import threading
 from typing import Optional, Any
 
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 from .api_base import BaseDownloaderAPI
 
 # TODO: Surely, there must be a better way to encode these. I don't think listing the tags explicitly would be a good idea. --PCBoy
@@ -164,6 +164,21 @@ class _TagAutocomplete:
         self._hide()
 
 
+# File types Danbooru and e621 report, and those that move.
+_SITE_FILE_TYPES = {"jpg", "png", "gif", "webp", "avif", "webm"}
+_ANIMATED_EXTENSIONS = {"gif", "webm"}
+
+
+def _allowed_extensions(media_type: MediaType) -> set[str]:
+    """Extensions we can show that match the chosen file type."""
+    playable = _displayable_extensions() | _video_extensions()
+    if media_type == MediaType.STATIC:
+        return playable - _ANIMATED_EXTENSIONS
+    if media_type == MediaType.ANIMATED:
+        return playable & _ANIMATED_EXTENSIONS
+    return playable
+
+
 @functools.lru_cache(maxsize=1)
 def _video_extensions() -> set[str]:
     """{"webm"} when GStreamer can demux and decode WebM for GtkVideo."""
@@ -241,9 +256,14 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
             pass
         return f"Danbooru answered with HTTP {r.status_code}"
 
-    def get_random_post(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW, max_retries: int = 3) -> Optional[dict]:
+    def get_random_post(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW, max_retries: int = 3,
+                        media_type: MediaType = MediaType.ALL) -> Optional[dict]:
         self.last_error = None
         tags = self._build_tags_query(nsfw_mode)
+        displayable = _allowed_extensions(media_type)
+        # filetype: doesn't count toward the anonymous tag limit.
+        if media_type != MediaType.ALL:
+            tags = f"{tags} filetype:{','.join(sorted(displayable & _SITE_FILE_TYPES))}".strip()
         # Ask for a batch of random posts and keep the first usable one:
         # many posts are ugoira/mp4 or formats we can't play, or have
         # no file_url for anonymous users, and a single random post would
@@ -254,7 +274,6 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
         }
         if tags:
             params["tags"] = tags
-        displayable = _displayable_extensions() | _video_extensions()
 
         for attempt in range(max_retries):
             try:
@@ -294,11 +313,13 @@ class DanbooruDownloaderAPI(BaseDownloaderAPI):
             print(f'Attempt {attempt + 1}: no displayable post in batch, retrying...')
 
         print(f'Could not find suitable post after {max_retries} attempts')
-        self.last_error = "No displayable Danbooru image found for these tags"
+        kind = "animated" if media_type == MediaType.ANIMATED else "displayable"
+        self.last_error = f"No {kind} Danbooru image found for these tags"
         return None
 
-    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW) -> Optional[str]:
-        post = self.get_random_post(nsfw_mode)
+    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW,
+                      media_type: MediaType = MediaType.ALL) -> Optional[str]:
+        post = self.get_random_post(nsfw_mode, media_type=media_type)
         if post:
             return post.get("file_url")
         return None

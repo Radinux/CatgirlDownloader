@@ -2,7 +2,7 @@ import requests
 import json
 from typing import Optional
 
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 from .api_base import BaseDownloaderAPI
 
 class CatgirlDownloaderAPI(BaseDownloaderAPI):
@@ -37,7 +37,11 @@ class CatgirlDownloaderAPI(BaseDownloaderAPI):
             self.last_error = "nekos.moe sent an unexpected response"
             return None
 
-    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW) -> Optional[str]:
+    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW,
+                      media_type: MediaType = MediaType.ALL) -> Optional[str]:
+        if media_type == MediaType.ANIMATED:
+            self.last_error = "nekos.moe only has still images"
+            return None
         image_id = self.get_random_image_id(nsfw_mode)
         if image_id:
             return "https://nekos.moe/image/" + image_id

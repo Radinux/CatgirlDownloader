@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 import requests
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 
 class BaseDownloaderAPI(ABC):
     def __init__(self) -> None:
@@ -12,7 +12,8 @@ class BaseDownloaderAPI(ABC):
         self.last_error: Optional[str] = None
 
     @abstractmethod
-    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW) -> Optional[str]:
+    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW,
+                      media_type: MediaType = MediaType.ALL) -> Optional[str]:
         pass
 
     @abstractmethod

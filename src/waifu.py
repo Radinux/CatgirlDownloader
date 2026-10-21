@@ -2,7 +2,7 @@ import requests
 import json
 from typing import Optional
 
-from .types import NSFWOption
+from .types import NSFWOption, MediaType
 from .api_base import BaseDownloaderAPI
 
 class WaifuDownloaderAPI(BaseDownloaderAPI):
@@ -10,7 +10,7 @@ class WaifuDownloaderAPI(BaseDownloaderAPI):
         super().__init__()
         self.endpoint = "https://api.waifu.im/images"
 
-    def get_page(self, nsfw: Optional[bool] = None) -> Optional[str]:
+    def get_page(self, nsfw: Optional[bool] = None, animated: Optional[bool] = None) -> Optional[str]:
         try:
             if nsfw is None:
                 params = {"IsNsfw": "All"}
@@ -18,6 +18,8 @@ class WaifuDownloaderAPI(BaseDownloaderAPI):
                 params = {"IsNsfw": "True"}
             else:
                 params = {"IsNsfw": "False"}
+            if animated is not None:
+                params["IsAnimated"] = str(animated)
             self.last_error = None
             r = requests.get(self.endpoint, params=params, timeout=10)
             if r.status_code == 200:
@@ -42,13 +44,19 @@ class WaifuDownloaderAPI(BaseDownloaderAPI):
             self.last_error = "waifu.im sent an unexpected response"
             return None
 
-    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW) -> Optional[str]:
+    def get_image_url(self, nsfw_mode: NSFWOption = NSFWOption.BLOCK_NSFW,
+                      media_type: MediaType = MediaType.ALL) -> Optional[str]:
         nsfw = False
         if nsfw_mode == NSFWOption.ONLY_NSFW or nsfw_mode == NSFWOption.ONLY_NSFW.value:
             nsfw = True
         elif nsfw_mode == NSFWOption.SHOW_EVERYTHING or nsfw_mode == NSFWOption.SHOW_EVERYTHING.value:
             nsfw = None
-        return self.get_page_url(self.get_page(nsfw))
+        animated = None
+        if media_type == MediaType.ANIMATED:
+            animated = True
+        elif media_type == MediaType.STATIC:
+            animated = False
+        return self.get_page_url(self.get_page(nsfw, animated))
 
     def get_artist(self, info: Optional[dict] = None) -> Optional[str]:
         data = info if info else self.info

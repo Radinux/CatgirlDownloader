@@ -23,6 +23,18 @@
             </child>
             <child>
               <object class="AdwActionRow">
+                <property name="title" translatable="yes">File type</property>
+                <property name="subtitle" translatable="yes">Photos, animations (GIF/WebM) or both</property>
+                <property name="activatable_widget">media_type_dropdown</property>
+                <child>
+                  <object class="GtkDropDown" id="media_type_dropdown">
+                    <property name="valign">center</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwActionRow">
                 <property name="title" translatable="yes">Auto reload interval (seconds)</property>
                 <property name="subtitle" translatable="yes">How often to load a new image when auto reload is enabled</property>
                 <property name="activatable_widget">auto_reload_seconds</property>
